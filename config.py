@@ -9,5 +9,5 @@ JSON_FILE = "mainDataQuran.json"
 
 # إعدادات الرسائل
 # خفضنا الحد إلى 35000 لأن سورة البقرة مع التشكيل ضخمة جداً
-MAX_MESSAGE_LENGTH = 25000  
+MAX_MESSAGE_LENGTH = 15000  
 DELAY_BETWEEN_PARTS = 1     # زدنا الانتظار قليلاً لضمان الترتيب
