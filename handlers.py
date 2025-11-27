@@ -188,4 +188,51 @@ def handle_incoming_message(chat_id, text):
 def format_text_msg(verses, title):
     msg = f"🕌 *{title}* 🕌\n━━━━━━━━━━━━\n\n"
     # بسملة
-    if verses[0]['numberInSurah'] == 1 and verses[0]['sura_nu
+    if verses[0]['numberInSurah'] == 1 and verses[0]['sura_number'] not in [1, 9]:
+        msg += "﷽\n\n"
+        
+    for v in verses:
+        sajda = " ۩" if v['sajda'] else ""
+        msg += f"{v['text']}{sajda} ({v['numberInSurah']}) "
+    return msg
+
+def process_audio_request(chat_id, verses, settings):
+    # التحقق من الحد الأقصى للدمج
+    if len(verses) > MAX_VERSES_TO_MERGE:
+        client.send_text(chat_id, "⚠️ *عدد الآيات كبير جداً للدمج الصوتي.* سيتم الاكتفاء بالنص.")
+        return
+
+    client.send_text(chat_id, "🎧 *جاري تحضير التلاوة...*")
+    
+    # جلب رابط القارئ المختار
+    reciter = get_reciter_details(settings['reciter_id'])
+    reciter_url = reciter['url']
+    
+    # تجهيز البيانات للمونتاج
+    verses_data = [{'sura': v['sura_number'], 'ayah': v['numberInSurah']} for v in verses]
+    
+    # الدمج
+    try:
+        file_path = mixer.merge_verses(verses_data, reciter_url)
+        if file_path:
+            client.send_file(chat_id, file_path)
+            # os.remove(file_path) # حذف بعد الإرسال (اختياري)
+        else:
+            client.send_text(chat_id, "❌ لم يتم العثور على الملف الصوتي.")
+    except Exception as e:
+        print(f"Audio Error: {e}")
+
+def get_welcome_text():
+    return (
+        "👋 *أهلاً بك في رفيق القرآن*\n\n"
+        "📜 *الأوامر المتاحة:*\n"
+        "• `س الكهف` أو `س 18` (للسور)\n"
+        "• `ج 30` (للأجزاء)\n"
+        "• `ص 100` (للصفحات)\n"
+        "• `آ البقرة 50` (آية)\n"
+        "• `آ البقرة 1 إلى 10` (مجموعة آيات)\n\n"
+        "⚙️ *الإعدادات:*\n"
+        "• `قراء` لعرض القراء\n"
+        "• `ق 2` لتغيير القارئ بسرعة\n"
+        "• `إعدادات` للتحكم بالصوت والنص"
+    )
