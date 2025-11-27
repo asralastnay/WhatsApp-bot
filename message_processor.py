@@ -1,4 +1,3 @@
-# message_processor.py
 import threading
 from data_loader import QuranHandler
 from whatsapp_client import GreenClient
@@ -7,43 +6,33 @@ quran = QuranHandler()
 client = GreenClient()
 
 def process_message(chat_id, text):
-    # تنظيف النص: إزالة المسافات الزائدة والهمزات لتسهيل البحث
+    # تنظيف النص لزيادة دقة البحث
     clean_text = text.strip().replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه')
     print(f"📩 معالجة: {text}")
 
-    # --- 1. البحث بالرقم (الأسرع والأدق) ---
+    # --- 1. البحث بالرقم ---
     if clean_text.isdigit():
         surah_num = int(clean_text)
         if 1 <= surah_num <= 114:
             send_surah_by_obj(chat_id, quran.get_surah_by_number(surah_num))
             return
         else:
-            client.send_text(chat_id, "❌ القرآن 114 سورة فقط. أرسل رقماً بين 1 و 114.")
+            client.send_text(chat_id, "❌ رقم غير صحيح. أرسل رقماً بين 1 و 114.")
             return
 
-    # --- 2. البحث الذكي بالاسم (بدون أوامر) ---
-    # نحاول معرفة هل النص يحتوي على اسم سورة؟
-    # مثلاً: "البقرة", "سورة البقره", "اريد سوره الكهف"
-    
-    # قائمة بأسماء السور للمقارنة
-    # (هنا نبحث في قاعدة البيانات هل توجد سورة تطابق كلام المستخدم؟)
-    found_surah = None
-    
-    # أولاً: بحث دقيق (هل الكلمة هي اسم سورة بالضبط؟)
+    # --- 2. البحث الذكي بالاسم ---
     found_surah = quran.get_surah_by_name(text.strip())
     
-    # ثانياً: إذا لم نجد، نبحث هل اسم السورة "جزء" من كلام المستخدم؟
     if not found_surah:
+        # بحث تقريبي داخل الأسماء
         for s in quran.data:
             s_name = s['name']['ar'].replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه')
-            # إذا كان اسم السورة موجود داخل النص المرسل (مثال: النص "هات الكهف" -> "الكهف" موجودة)
-            if s_name in clean_text:
+            if s_name in clean_text: # هل اسم السورة جزء من الرسالة؟
                 found_surah = s
                 break
     
-    # إذا وجدنا سورة، نرسلها فوراً
     if found_surah:
-        client.send_text(chat_id, f"✅ فهمت أنك تريد سورة *{found_surah['name']['ar']}*.. جاري الإرسال..")
+        client.send_text(chat_id, f"✅ جاري إرسال سورة *{found_surah['name']['ar']}*...")
         send_surah_by_obj(chat_id, found_surah)
         return
 
@@ -51,8 +40,6 @@ def process_message(chat_id, text):
     if text.startswith("آ ") or text.startswith("اية "):
         try:
             parts = text.split()
-            # نتوقع: آ البقرة 5
-            # نحاول تخطي الرمز الأول وأخذ الباقي
             surah_part = parts[1]
             ayah_part = int(parts[2])
             ayah = quran.get_ayah(surah_part, ayah_part)
@@ -65,7 +52,6 @@ def process_message(chat_id, text):
 
     if text.startswith("ص ") or text.startswith("صفحة "):
         try:
-            # نستخرج الرقم من النص (مثال: ص 50 -> 50)
             p_num = int(''.join(filter(str.isdigit, text)))
             verses = quran.get_page_verses(p_num)
             if verses:
@@ -75,36 +61,49 @@ def process_message(chat_id, text):
         except:
             pass
 
-    # --- 4. رسالة الترحيب الذكية (إذا فشل كل شيء) ---
+    # رسالة المساعدة
     welcome_msg = (
-        "👋 *حياك الله في بوت القرآن الكريم*\n\n"
-        "أنا تطورت وصرت أفهمك بشكل أفضل! 🤖✨\n\n"
-        "📜 *كيف تستخدمني؟*\n"
-        "فقط اكتب اسم السورة أو رقمها، وسأرسلها لك.\n\n"
-        "جرب الآن:\n"
-        "• اكتب: `البقرة`\n"
-        "• أو اكتب رقم: `2`\n"
-        "• أو اكتب: `سورة الكهف`\n"
-        "• للصفحات اكتب: `ص 50`"
+        "👋 *أهلاً بك في بوت القرآن الكريم*\n\n"
+        "اكتب اسم السورة أو رقمها فقط وسأرسلها لك.\n\n"
+        "أمثلة:\n"
+        "• `البقرة` أو `2`\n"
+        "• `الكهف` أو `18`\n"
+        "• `ص 100` (للصفحات)"
     )
     client.send_text(chat_id, welcome_msg)
 
-# دالة مساعدة لتجهيز نص السورة وإرساله
+# --- دالة تجهيز السورة (تم تعديلها لتناسب بياناتك) ---
 def send_surah_by_obj(chat_id, surah):
     if not surah: return
     
-    # تجميع الآيات
-    verses = " ".join([f"{a['text']['ar']} ({a['number']})" for a in surah['verses']])
+    # 1. تجميع الآيات مع إضافة علامة السجدة
+    verses_list = []
+    for ayah in surah['verses']:
+        ayah_text = ayah['text']['ar']
+        ayah_num = ayah['number']
+        
+        # إضافة علامة السجدة إذا وجدت في البيانات
+        sajda_mark = " ۩" if ayah.get('sajda') is True else ""
+        
+        verses_list.append(f"{ayah_text} ({ayah_num}){sajda_mark}")
+
+    verses_str = " ".join(verses_list)
     
-    # الترويسة الجميلة
-    header = f"✨ *سورة {surah['name']['ar']}* ✨\n"
-    header += f"🔢 ترتيبها: {surah['number']} | 📍 {surah['type']['ar']} | 📝 آياتها: {len(surah['verses'])}\n"
+    # 2. استخراج البيانات الصحيحة من ملفك
+    s_name = surah['name']['ar']
+    s_num = surah['number']
+    s_place = surah['revelation_place']['ar'] # (مكية/مدنية) تم الإصلاح هنا
+    s_count = surah['verses_count']
+    
+    # 3. بناء الترويسة
+    header = f"✨ *سورة {s_name}* ✨\n"
+    header += f"🔢 رقمها: {s_num} | 📍 {s_place} | 📝 آياتها: {s_count}\n"
     header += "─" * 20 + "\n\n"
     
-    if surah['number'] not in [1, 9]: 
+    if s_num not in [1, 9]: 
         header += "بِسْمِ اللَّهِ الرَّحْمَـٰنِ الرَّحِيمِ\n"
     
-    full_text = header + verses
+    full_text = header + verses_str
     
-    # الإرسال في الخلفية
+    # 4. الإرسال
     threading.Thread(target=client.send_text, args=(chat_id, full_text)).start()
