@@ -1,243 +1,123 @@
 import json
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
+import requests
+from flask import Flask, request, jsonify
 
-# إعداد تطبيق Flask
 app = Flask(__name__)
 
-# متغير لتخزين حالة المستخدمين (بديل لـ context.user_data في تيليجرام)
-# التنسيق: {'whatsapp_number': {'state': '...', 'page': 0}}
-users_state = {}
+# --- بيانات GREEN-API الخاصة بك ---
+ID_INSTANCE = "7105395235"
+API_TOKEN_INSTANCE = "7a7cf9442dbc4d9cb736b48c11ff9c5a077f22ed00fc465dbe"
 
-# تحميل بيانات السور والآيات
+# رابط API للإرسال
+API_URL = f"https://api.green-api.com/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
+
+# تحميل بيانات القرآن
 def load_data():
     try:
+        print("جاري تحميل ملف البيانات...")
         with open("mainDataQuran.json", "r", encoding="utf-8") as file:
-            data = json.load(file)
-        return data
-    except FileNotFoundError:
-        print("ملف قاعدة البيانات غير موجود.")
+            return json.load(file)
+    except Exception as e:
+        print(f"خطأ في تحميل الملف: {e}")
         return []
 
 data = load_data()
 
-# دالة لتقسيم الرسائل الطويلة (واتساب حدوده 1600 حرف تقريباً)
-def send_long_message(resp, text):
-    max_length = 1500
-    for i in range(0, len(text), max_length):
-        resp.message(text[i:i + max_length])
+# دالة إرسال الرسالة عبر GREEN-API
+def send_message(chat_id, text):
+    payload = {
+        "chatId": chat_id,
+        "message": text
+    }
+    headers = {'Content-Type': 'application/json'}
+    try:
+        response = requests.post(API_URL, json=payload, headers=headers)
+        print(f"حالة الإرسال: {response.status_code}")
+    except Exception as e:
+        print(f"خطأ في الإرسال: {e}")
 
-# دالة البحث عن سورة (نفس المنطق السابق)
-def get_surah_text(surah_name):
-    surah = next((s for s in data if s['name']['ar'] == surah_name), None)
-    if surah:
-        verses = [f"{ayah['text']['ar']} ({ayah['number']})" for ayah in surah['verses']]
-        response = f"*{surah['name']['ar']}*\n"
-        if surah['number'] != 1 and surah['number'] != 9:
-            response += "بِسْمِ اللَّهِ الرَّحْمَـٰنِ الرَّحِيمِ\n"
-        response += " ".join(verses)
-        return response
-    return None
-
-# دالة البحث عن آية
-def get_ayah_text(surah_name, start_ayah, end_ayah=None):
-    surah = next((s for s in data if s['name']['ar'] == surah_name), None)
-    if surah:
-        if end_ayah is None:
-            end_ayah = start_ayah
-        if 1 <= start_ayah <= len(surah['verses']) and 1 <= end_ayah <= len(surah['verses']):
-            verses = [f"{surah['verses'][i-1]['text']['ar']} ({surah['verses'][i-1]['number']})" for i in range(start_ayah, end_ayah + 1)]
-            response = f"سورة {surah['name']['ar']} - الآيات {start_ayah}-{end_ayah}\n"
-            response += " ".join(verses)
-            return response
-    return None
-
-# دالة البحث عن صفحة
-def get_page_text(page_number):
-    verses = [f"{ayah['text']['ar']} ({ayah['number']})" for surah in data for ayah in surah['verses'] if ayah['page'] == page_number]
-    if verses:
-        response = f"*الصفحة {page_number}*\n" + " ".join(verses)
-        return response
-    return None
-
-# دالة البحث عن جزء
-def get_part_text(part_number):
-    verses = [f"{ayah['text']['ar']} ({ayah['number']})" for surah in data for ayah in surah['verses'] if ayah['juz'] == part_number]
-    if verses:
-        response = f"*الجزء {part_number}*\n" + " ".join(verses)
-        return response
-    return None
-
-@app.route("/bot", methods=['POST'])
-def bot():
-    # استقبال الرسالة من واتساب
-    incoming_msg = request.values.get('Body', '').strip()
-    sender_id = request.values.get('From', '')
+# دالة تجهيز الرد
+def get_reply(msg):
+    msg = msg.strip()
     
-    # تهيئة الاستجابة
-    resp = MessagingResponse()
+    # 1. القائمة والمساعدة
+    if msg.lower() in ['start', 'مرحبا', 'قائمة', 'menu', 'هلا']:
+        return "مرحباً بك في بوت القرآن الكريم 📖\n\nأرسل ما تريد:\n🔹 *س البقرة* (لإرسال السورة كاملة)\n🔹 *آ البقرة 255* (لإرسال آية محددة)\n🔹 *ص 5* (لإرسال صفحة)"
     
-    # تهيئة حالة المستخدم إذا لم تكن موجودة
-    if sender_id not in users_state:
-        users_state[sender_id] = {'state': 'main', 'page_index': 0}
-    
-    user = users_state[sender_id]
-    
-    # --- القائمة الرئيسية والأوامر ---
-    
-    # 1. القائمة الرئيسية
-    if incoming_msg.lower() in ['start', 'مرحبا', 'قائمة', 'menu']:
-        user['state'] = 'main'
-        msg = "*مرحباً بك في بوت القرآن الكريم 📖*\n\n"
-        msg += "أرسل الرقم للاختيار:\n"
-        msg += "1️⃣ عرض السور\n"
-        msg += "2️⃣ عرض الأجزاء\n"
-        msg += "3️⃣ عرض صفحة محددة\n\n"
-        msg += "*أوامر البحث السريع:*\n"
-        msg += "- `س البقرة` (للبحث عن سورة)\n"
-        msg += "- `آ البقرة 255` (للبحث عن آية)\n"
-        msg += "- `ص 5` (لعرض صفحة)\n"
-        resp.message(msg)
-        return str(resp)
+    # 2. بحث سورة
+    if msg.startswith("س "):
+        surah_name = msg[2:].strip()
+        surah = next((s for s in data if s['name']['ar'] == surah_name), None)
+        if surah:
+            verses = " ".join([f"{a['text']['ar']} ({a['number']})" for a in surah['verses']])
+            full_text = f"*{surah['name']['ar']}*\n\n{verses}"
+            # نرسل أول 4000 حرف لتجنب مشاكل الطول
+            return full_text[:4000] 
+        return "لم أتمكن من العثور على السورة، تأكد من كتابة الاسم صحيحاً (مثال: س الكهف)."
 
-    # 2. معالجة أوامر البحث المباشر (س، آ، ص)
-    if incoming_msg.startswith("س "):
-        surah_name = incoming_msg[2:].strip()
-        text = get_surah_text(surah_name)
-        if text:
-            send_long_message(resp, text)
-        else:
-            resp.message("لم أتمكن من العثور على السورة.")
-        return str(resp)
-
-    elif incoming_msg.startswith("آ "):
-        parts = incoming_msg[2:].strip().split()
-        if len(parts) >= 2:
-            surah_name = parts[0]
-            try:
-                start = int(parts[1])
-                end = int(parts[3]) if len(parts) == 4 and parts[2] == 'إلى' else start
-                text = get_ayah_text(surah_name, start, end)
-                if text:
-                    send_long_message(resp, text)
-                else:
-                    resp.message("لم أتمكن من العثور على الآية.")
-            except ValueError:
-                resp.message("تأكد من كتابة الأرقام بشكل صحيح.")
-        else:
-            resp.message("الصيغة: آ البقرة 5")
-        return str(resp)
-
-    elif incoming_msg.startswith("ص "):
+    # 3. بحث آية
+    if msg.startswith("آ "):
         try:
-            page = int(incoming_msg[2:].strip())
-            text = get_page_text(page)
-            if text:
-                send_long_message(resp, text)
-            else:
-                resp.message("رقم الصفحة غير صحيح.")
-        except ValueError:
-            resp.message("يرجى إدخال رقم صحيح.")
-        return str(resp)
-
-    # --- معالجة الحالات (State Handling) ---
-
-    # العودة للقائمة الرئيسية
-    if incoming_msg == '0':
-        user['state'] = 'main'
-        resp.message("تم الرجوع للقائمة الرئيسية. أرسل 'قائمة' للعرض.")
-        return str(resp)
-
-    # معالجة اختيار المستخدم من القائمة الرئيسية
-    if user['state'] == 'main':
-        if incoming_msg == '1':
-            user['state'] = 'browsing_surahs'
-            user['page_index'] = 0
-            # عرض الصفحة الأولى من السور
-            show_surahs_list(resp, 0)
-        elif incoming_msg == '2':
-            user['state'] = 'browsing_parts'
-            msg = "*اختر الجزء (أرسل رقم الجزء من 1-30):*\n"
-            msg += "أو أرسل 0 للرجوع."
-            resp.message(msg)
-        elif incoming_msg == '3':
-            user['state'] = 'awaiting_page_num'
-            resp.message("أدخل رقم الصفحة التي تريدها (1-604):\nأو أرسل 0 للرجوع.")
-        else:
-            resp.message("خيار غير صحيح. أرسل 'قائمة' للبدء.")
-
-    # حالة تصفح السور
-    elif user['state'] == 'browsing_surahs':
-        if incoming_msg == 'التالي' or incoming_msg == '+':
-            user['page_index'] += 1
-            show_surahs_list(resp, user['page_index'])
-        elif incoming_msg == 'السابق' or incoming_msg == '-':
-            if user['page_index'] > 0:
-                user['page_index'] -= 1
-            show_surahs_list(resp, user['page_index'])
-        elif incoming_msg.isdigit():
-            # المستخدم اختار رقم سورة
-            surah_num = int(incoming_msg)
-            surah = next((s for s in data if s['number'] == surah_num), None)
+            parts = msg[2:].split()
+            surah_name = parts[0]
+            ayah_num = int(parts[1])
+            surah = next((s for s in data if s['name']['ar'] == surah_name), None)
             if surah:
-                text = get_surah_text(surah['name']['ar'])
-                send_long_message(resp, text)
-            else:
-                resp.message("رقم سورة غير صحيح.")
-        else:
-            resp.message("أرسل رقم السورة، أو (+) للتالي، أو (-) للسابق، أو (0) للرجوع.")
+                ayah = next((a for a in surah['verses'] if a['number'] == ayah_num), None)
+                if ayah:
+                    return f"*{surah_name} ({ayah_num})*\n{ayah['text']['ar']}"
+        except:
+            pass
+        return "تأكد من الصيغة الصحيحة، مثال: آ البقرة 255"
 
-    # حالة تصفح الأجزاء
-    elif user['state'] == 'browsing_parts':
-        if incoming_msg.isdigit():
-            part = int(incoming_msg)
-            if 1 <= part <= 30:
-                text = get_part_text(part)
-                send_long_message(resp, text)
-            else:
-                resp.message("الجزء يجب أن يكون بين 1 و 30.")
-        else:
-            resp.message("يرجى إرسال رقم الجزء فقط.")
+    # 4. بحث صفحة
+    if msg.startswith("ص "):
+        try:
+            page = int(msg[2:].strip())
+            verses = [f"{a['text']['ar']} ({a['number']})" for s in data for a in s['verses'] if a['page'] == page]
+            if verses:
+                return f"*الصفحة {page}*\n" + " ".join(verses)
+        except:
+            pass
+        return "رقم الصفحة غير صحيح."
 
-    # حالة انتظار رقم الصفحة
-    elif user['state'] == 'awaiting_page_num':
-        if incoming_msg.isdigit():
-            page = int(incoming_msg)
-            text = get_page_text(page)
-            if text:
-                send_long_message(resp, text)
-                user['state'] = 'main' # إعادة للقائمة الرئيسية بعد الطلب
-            else:
-                resp.message("رقم صفحة غير موجود.")
-        else:
-            resp.message("يرجى إرسال أرقام فقط.")
+    return None
 
-    return str(resp)
-
-# دالة مساعدة لعرض قائمة السور كنص
-def show_surahs_list(resp, page_index):
-    surahs_per_page = 14
-    start_index = page_index * surahs_per_page
-    end_index = start_index + surahs_per_page
-    current_surahs = data[start_index:end_index]
+# نقطة استقبال الرسائل (Webhook)
+@app.route("/webhook", methods=['POST'])
+def webhook():
+    body = request.get_json()
     
-    if not current_surahs:
-        resp.message("لا توجد سور أخرى.")
-        return
+    # إذا لم تصل بيانات، نتجاهل الطلب
+    if not body:
+        return "No Data", 200
+        
+    try:
+        # Green-API يرسل أنواع مختلفة، نحن نريد incomingMessageReceived
+        type_webhook = body.get('typeWebhook', '')
+        
+        if type_webhook == 'incomingMessageReceived':
+            message_data = body.get('messageData', {})
+            type_message = message_data.get('typeMessage', '')
+            
+            # نتأكد أنها رسالة نصية
+            if type_message == 'textMessage':
+                text_content = message_data.get('textMessageData', {}).get('textMessage', '')
+                sender_chat_id = body.get('senderData', {}).get('chatId', '')
+                
+                print(f"رسالة جديدة من {sender_chat_id}: {text_content}")
+                
+                # نجهز الرد
+                reply = get_reply(text_content)
+                
+                # إذا كان هناك رد، نرسله
+                if reply:
+                    send_message(sender_chat_id, reply)
 
-    msg = f"*قائمة السور (صفحة {page_index + 1})*\n"
-    msg += "أرسل رقم السورة لعرضها:\n\n"
-    
-    for surah in current_surahs:
-        msg += f"{surah['number']}. {surah['name']['ar']}\n"
-    
-    msg += "\n--------\n"
-    msg += "أرسل (+) للتالي\n"
-    if page_index > 0:
-        msg += "أرسل (-) للسابق\n"
-    msg += "أرسل (0) للرجوع للقائمة الرئيسية"
-    
-    resp.message(msg)
+    except Exception as e:
+        print(f"خطأ عام في الويب هوك: {e}")
+
+    return "OK", 200
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(port=5000)
