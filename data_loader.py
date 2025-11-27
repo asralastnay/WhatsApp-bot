@@ -64,4 +64,32 @@ class QuranHandler:
         return None
 
     # --- جلب مجال آيات (للمونتاج الصوتي) ---
-    def get_ayah_rang
+    def get_ayah_range(self, identifier, start, end):
+        sura_num = self._get_surah_number(identifier)
+        if not sura_num: return None
+
+        verses = []
+        for ayah in self.data:
+            if ayah['sura_number'] == sura_num:
+                if start <= ayah['numberInSurah'] <= end:
+                    verses.append(ayah)
+        return verses
+
+    # --- جلب صفحة ---
+    def get_page(self, page_num):
+        return [a for a in self.data if a['page'] == page_num]
+
+    # --- جلب جزء ---
+    def get_juz(self, juz_num):
+        return [a for a in self.data if a['juz'] == juz_num]
+
+    # --- جلب حزب (الميزة الجديدة) ---
+    def get_hizb(self, hizb_num):
+        return [a for a in self.data if a['hizb'] == hizb_num]
+
+    # --- دالة مساعدة لجلب اسم السورة من رقمها (للعرض) ---
+    def get_surah_name_by_number(self, surah_num):
+        for ayah in self.data:
+            if ayah['sura_number'] == surah_num:
+                return ayah['sura_name']
+        return "غير معروف"
