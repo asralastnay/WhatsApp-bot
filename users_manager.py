@@ -4,49 +4,55 @@ from config import USERS_FILE, DEFAULT_USER_SETTINGS
 
 class UsersManager:
     def __init__(self):
-        self.users = self._load_users()
+        self.users = {}
+        self._load_users()
 
     def _load_users(self):
-        """تحميل المستخدمين من الملف عند تشغيل البوت"""
+        """تحميل المستخدمين مع حماية ضد الأخطاء"""
         if not os.path.exists(USERS_FILE):
-            # إذا الملف غير موجود، نرجّع قاموس فارغ
-            return {}
+            print("⚠️ ملف المستخدمين غير موجود، سيتم إنشاء واحد جديد.")
+            self.users = {}
+            return
         
         try:
             with open(USERS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                content = f.read().strip()
+                if not content: # إذا الملف فارغ
+                    self.users = {}
+                else:
+                    self.users = json.loads(content)
+            print(f"✅ تم تحميل {len(self.users)} مستخدم.")
         except Exception as e:
-            print(f"❌ خطأ في تحميل ملف المستخدمين: {e}")
-            return {}
+            print(f"❌ ملف المستخدمين تالف ({e})! سيتم إعادة ضبطه لتجنب توقف البوت.")
+            self.users = {} # إعادة ضبط لتجنب الكراش
+            self._save_users() # حفظ النسخة النظيفة
 
     def _save_users(self):
-        """حفظ التغييرات في الملف"""
+        """حفظ التغييرات"""
         try:
             with open(USERS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.users, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print(f"❌ خطأ في حفظ ملف المستخدمين: {e}")
+            print(f"❌ فشل حفظ المستخدمين: {e}")
 
     def get_user_settings(self, chat_id):
-        """جلب إعدادات مستخدم معين (وإنشاؤه إذا كان جديداً)"""
-        if chat_id not in self.users:
-            # مستخدم جديد! ننسخ الإعدادات الافتراضية له
-            print(f"👤 مستخدم جديد: {chat_id}")
-            self.users[chat_id] = DEFAULT_USER_SETTINGS.copy()
+        """جلب الإعدادات بأمان تام"""
+        # تحويل الرقم لنص لضمان التوافق
+        str_chat_id = str(chat_id)
+        
+        if str_chat_id not in self.users:
+            print(f"👤 تسجيل مستخدم جديد: {str_chat_id}")
+            # نسخ الإعدادات الافتراضية
+            self.users[str_chat_id] = DEFAULT_USER_SETTINGS.copy()
             self._save_users()
         
-        return self.users[chat_id]
+        return self.users[str_chat_id]
 
     def update_setting(self, chat_id, key, value):
-        """تعديل إعداد معين (مثلاً إيقاف الصوت)"""
-        if chat_id not in self.users:
-            self.get_user_settings(chat_id) # تسجيله أولاً
+        str_chat_id = str(chat_id)
+        if str_chat_id not in self.users:
+            self.get_user_settings(str_chat_id)
             
-        self.users[chat_id][key] = value
+        self.users[str_chat_id][key] = value
         self._save_users()
-        print(f"⚙️ تم تحديث إعداد {key} للمستخدم {chat_id} إلى {value}")
-
-    def get_user_reciter(self, chat_id):
-        """دالة مختصرة لمعرفة رقم قارئ المستخدم"""
-        settings = self.get_user_settings(chat_id)
-        return settings.get("reciter_id", 1) # الافتراضي 1 إذا لم يوجد
+        print(f"⚙️ تحديث {key} لـ {str_chat_id}")
