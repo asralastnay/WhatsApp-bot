@@ -2,14 +2,13 @@ import requests
 import time
 import os
 import json
+import base64  # <--- مكتبة جديدة مهمة
 from config import WAHA_BASE_URL, WAHA_API_KEY, MAX_MESSAGE_LENGTH, DELAY_BETWEEN_PARTS
 
 class GreenClient:
     def __init__(self):
-        # اسم الجلسة التي أنشأتها
         self.session = "default"
         self.base_url = WAHA_BASE_URL
-        # إعداد الهيدر مع المفتاح الجديد
         self.headers = {
             'Content-Type': 'application/json',
             'X-Api-Key': WAHA_API_KEY
@@ -19,12 +18,10 @@ class GreenClient:
     def send_text(self, chat_id, text):
         url = f"{self.base_url}/api/sendText"
         
-        # إذا كانت الرسالة قصيرة
         if len(text) <= MAX_MESSAGE_LENGTH:
             self._post_text(url, chat_id, text)
             return
 
-        # إذا كانت طويلة (تقسيم)
         parts = [text[i:i+MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
         for i, part in enumerate(parts):
             self._post_text(url, chat_id, part)
@@ -41,44 +38,54 @@ class GreenClient:
         except Exception as e:
             print(f"Error Send: {e}")
 
-    # --- 2. إرسال الملفات (الصوت) ---
+    # --- 2. إرسال الملفات (باستخدام Base64 - الطريقة الأضمن) ---
     def send_file(self, chat_id, file_path):
-        if not os.path.exists(file_path): return
+        if not os.path.exists(file_path):
+            print("❌ الملف غير موجود")
+            return
 
         url = f"{self.base_url}/api/sendFile"
         filename = os.path.basename(file_path)
         
         try:
-            with open(file_path, 'rb') as f:
-                # WAHA يفضل استقبال الملفات بهذه الطريقة
-                files = {
-                    'file': (filename, f, 'audio/mp3')
-                }
-                data = {
-                    'session': self.session,
-                    'chatId': chat_id,
-                    'caption': "🎧 تلاوة مدمجة"
-                }
-                # ملاحظة: لا نرسل Content-Type هنا لأن requests تضبطها تلقائياً مع الملفات
-                # لكن نرسل المفتاح
-                headers_files = {'X-Api-Key': WAHA_API_KEY}
-                
-                print(f"📤 جاري إرسال الملف: {filename}")
-                requests.post(url, data=data, files=files, headers=headers_files)
-                print("✅ تم الإرسال")
+            print(f"🔄 جاري تشفير الملف: {filename}...")
+            
+            # 1. قراءة الملف وتحويله إلى Base64
+            with open(file_path, "rb") as file:
+                encoded_string = base64.b64encode(file.read()).decode('utf-8')
+            
+            # 2. تجهيز البيانات كـ JSON (هكذا لن يرفضها السيرفر)
+            payload = {
+                "session": self.session,
+                "chatId": chat_id,
+                "file": {
+                    "mimetype": "audio/mpeg", # نوع الملف mp3
+                    "filename": filename,
+                    "data": encoded_string
+                },
+                "caption": "🎧 تلاوة مدمجة"
+            }
+            
+            # 3. الإرسال
+            print(f"📤 جاري إرسال البيانات للسيرفر...")
+            response = requests.post(url, json=payload, headers=self.headers)
+            
+            if response.status_code == 200:
+                print("✅ تم إرسال الملف الصوتي بنجاح")
+            else:
+                print(f"❌ خطأ من WAHA: {response.status_code} - {response.text}")
+
         except Exception as e:
             print(f"Error sending file: {e}")
 
-    # --- 3. إرسال القوائم (تحويل لنص بديل) ---
+    # --- 3. إرسال القوائم ---
     def send_list(self, chat_id, title, btn_text, rows, description=""):
-        # WAHA Free لا يدعم القوائم التفاعلية جيداً، نستخدم النص الأضمن
         self.send_text_menu_fallback(chat_id, rows)
 
     def send_text_menu_fallback(self, chat_id, rows):
         msg = "📋 *القائمة:*\n━━━━━━━━━\n"
         for row in rows:
             cmd = row['rowId']
-            # تبسيط شكل الأمر للمستخدم
             if "CMD_SURAH_" in cmd:
                 display_cmd = f"س {cmd.split('_')[2]}"
             elif "LIST_PAGE_" in cmd:
