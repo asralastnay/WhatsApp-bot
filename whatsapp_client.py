@@ -5,8 +5,8 @@ from config import WAHA_BASE_URL, WAHA_API_KEY, MAX_MESSAGE_LENGTH, DELAY_BETWEE
 
 class GreenClient:
     def __init__(self):
-        self.base_url = WAHA_BASE_URL
-        self.api_key = WAHA_API_KEY
+        self.base_url = https://surver-for-whatsapp.onrender.com
+        self.api_key = 12345
         self.send_text_url = f"{self.base_url}/api/sendText"
         self.send_file_url = f"{self.base_url}/api/sendFile"
 
