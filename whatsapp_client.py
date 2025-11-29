@@ -46,38 +46,32 @@ class GreenClient:
 
         url = f"{self.base_url}/api/sendFile"
         filename = os.path.basename(file_path)
+        public_file_url = f"{MY_BOT_URL}/audio/{filename}"
         
         try:
-            print(f"🔄 جاري تشفير الملف: {filename}...")
+            print(f"🔗 إرسال الملف عبر الرابط: {public_file_url}")
             
-            # 1. قراءة الملف وتحويله إلى Base64
-            with open(file_path, "rb") as file:
-                encoded_string = base64.b64encode(file.read()).decode('utf-8')
-            
-            # 2. تجهيز البيانات كـ JSON (هكذا لن يرفضها السيرفر)
             payload = {
                 "session": self.session,
                 "chatId": chat_id,
                 "file": {
-                    "mimetype": "audio/mpeg", # نوع الملف mp3
+                    "url": public_file_url,
                     "filename": filename,
-                    "data": encoded_string
+                    "mimetype": "audio/mpeg"  # <--- هذا السطر الجديد المهم جداً
                 },
                 "caption": "🎧 تلاوة مدمجة"
             }
             
-            # 3. الإرسال
-            print(f"📤 جاري إرسال البيانات للسيرفر...")
             response = requests.post(url, json=payload, headers=self.headers)
             
             if response.status_code == 200:
-                print("✅ تم إرسال الملف الصوتي بنجاح")
+                print("✅ تم إرسال طلب الملف بنجاح")
             else:
                 print(f"❌ خطأ من WAHA: {response.status_code} - {response.text}")
 
         except Exception as e:
             print(f"Error sending file: {e}")
-
+            
     # --- 3. إرسال القوائم ---
     def send_list(self, chat_id, title, btn_text, rows, description=""):
         self.send_text_menu_fallback(chat_id, rows)
