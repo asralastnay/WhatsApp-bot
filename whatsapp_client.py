@@ -8,7 +8,7 @@ class GreenClient:
     def __init__(self):
         # ضع رابط سيرفرك الجديد هنا (الذي رفعته على Render)
         # ملاحظة: لا تضع /webhook هنا، نحن نتكلم مع الـ API لإرسال الرسائل
-        self.base_url = "https://your-app-name.onrender.com"  # ⚠️ استبدل هذا برابط تطبيقك الحقيقي
+        self.base_url = "https://surver-for-whatsapp.onrender.com"  # ⚠️ استبدل هذا برابط تطبيقك الحقيقي
         self.api_key = "12345" # إذا كنت لا تتحقق منه في Node.js فلا داعي للقلق بشأنه
         
         # النقاط النهائية (Endpoints) كما عرفناها في كود Node.js
