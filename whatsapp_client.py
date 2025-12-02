@@ -1,7 +1,7 @@
 import requests
 import time
 import os
-# استيراد الإعدادات من ملف config لضمان التوافق
+# استيراد الإعدادات من ملف config
 from config import (
     WAHA_BASE_URL, 
     WAHA_API_KEY, 
@@ -16,7 +16,7 @@ class GreenClient:
         self.base_url = WAHA_BASE_URL
         self.api_key = WAHA_API_KEY
         
-        # نقاط الاتصال (Endpoints)
+        # نقاط الاتصال
         self.send_text_url = f"{self.base_url}/api/sendText"
         self.send_file_url = f"{self.base_url}/api/sendFile"
 
@@ -33,10 +33,7 @@ class GreenClient:
         
         # إرسال مباشر إذا كانت الرسالة قصيرة
         if len(text) <= MAX_MESSAGE_LENGTH:
-            payload = {
-                "chatId": chat_id,
-                "text": text
-            }
+            payload = { "chatId": chat_id, "text": text }
             try:
                 requests.post(self.send_text_url, json=payload, headers=headers)
             except Exception as e:
@@ -46,69 +43,58 @@ class GreenClient:
         # تقسيم الرسائل الطويلة
         parts = [text[i:i+MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
         for i, part in enumerate(parts):
-            payload = {
-                "chatId": chat_id,
-                "text": part
-            }
+            payload = { "chatId": chat_id, "text": part }
             try:
                 requests.post(self.send_text_url, json=payload, headers=headers)
                 time.sleep(DELAY_BETWEEN_PARTS)
             except Exception as e:
                 print(f"Error Part {i}: {e}")
 
-    # --- 2. إرسال الملفات (مع معالجة الروابط المحلية) ---
+    # --- 2. إرسال الملفات (Voice Note) ---
     def send_file(self, chat_id, file_path_or_url, caption=""):
         try:
             headers = self._get_headers()
             final_url = ""
             
-            # تحديد نوع الملف الافتراضي
-            mimetype = 'audio/mp4' 
+            # 1. إعدادات الصوت الافتراضية (للآيفون والواتساب)
+            mimetype = 'audio/ogg; codecs=opus' 
 
-            # --- المنطق الذكي لتحويل المسارات ---
-            # 1. إذا كان القادم رابط إنترنت (مثل: https://server8.mp3quran.net/...)
+            # 2. فحص الرابط أو الملف
             if str(file_path_or_url).startswith("http"):
                 final_url = file_path_or_url
-            
-            # 2. إذا كان ملفاً محلياً في السيرفر (مثل: audio_temp/merged.mp3)
+                # إذا كان رابط خارجي مباشر (mp3) نغير النوع ليعمل
+                if final_url.endswith(".mp3"):
+                     mimetype = 'audio/mp4'
             else:
+                # إذا كان ملف محلي (تم دمجه وتحويله لـ ogg في audio_mixer)
                 filename = os.path.basename(file_path_or_url)
-                # نحوله لرابط باستخدام رابط بوت البايثون
                 final_url = f"{MY_BOT_URL}/audio/{filename}"
                 print(f"🔄 Converted local path to URL: {final_url}")
 
-            # محاولة تخمين نوع الملف من الامتداد
-            if str(final_url).endswith('.pdf'): mimetype = 'application/pdf'
-            elif str(final_url).endswith('.jpg') or str(final_url).endswith('.png'): mimetype = 'image/jpeg'
-            elif str(final_url).endswith('.mp3'): mimetype = 'audio/mp4'
-
-            # تجهيز البيانات كـ JSON
+            # 3. تجهيز البيانات
             payload = {
                 'chatId': chat_id,
-                'file': { 'url': final_url }, # السيرفر ينتظر رابطاً هنا
+                'file': { 'url': final_url },
                 'mimetype': mimetype,
-                'caption': caption
+                'caption': caption,
+                'ptt': True  # ✅ أمر تحويل الرسالة إلى Voice Note
             }
             
-            print(f"📤 Sending file request to Node.js: {final_url}")
+            print(f"📤 Sending Voice Note to Node.js: {final_url}")
             
-            response = requests.post(
-                self.send_file_url, 
-                json=payload, 
-                headers=headers
-            )
+            # 4. التنفيذ والتحقق
+            response = requests.post(self.send_file_url, json=payload, headers=headers)
             
             if response.status_code in [200, 201]:
-                print("✅ File Sent Successfully!")
+                print("✅ Voice Note sent successfully!")
             else:
-                print(f"❌ Server Error ({response.status_code}): {response.text}")
+                print(f"❌ Server Error: {response.status_code} - {response.text}")
 
         except Exception as e:
             print(f"Error sending file: {e}")
 
-    # --- 3. القوائم (Fallback to Text) ---
+    # --- 3. القوائم (نصية) ---
     def send_list(self, chat_id, title, btn_text, rows, description=""):
-        # نستخدم القائمة النصية لأنها أكثر استقراراً
         self.send_text_menu_fallback(chat_id, rows, title, description)
 
     def send_text_menu_fallback(self, chat_id, rows, title, description):
@@ -117,7 +103,6 @@ class GreenClient:
             cmd = row.get('rowId', '')
             row_title = row.get('title', '')
             
-            # استخراج الأرقام لتسهيل الاختيار
             display_cmd = ""
             if 'CMD_SURAH' in cmd:
                 try:
