@@ -1,85 +1,143 @@
 import os
+import subprocess
 import requests
-from pydub import AudioSegment
 from config import AUDIO_CACHE_DIR
 
 class AudioMixer:
     def __init__(self):
+        # التأكد من وجود مجلد الكاش
         if not os.path.exists(AUDIO_CACHE_DIR):
             os.makedirs(AUDIO_CACHE_DIR)
+        
+        # إنشاء ملف صمت قياسي مرة واحدة (مدته 1 ثانية) لاستخدامه في الفواصل
+        # نستخدم ffmpeg لإنشائه لضمان تطابق التردد
+        self.silence_path = os.path.join(AUDIO_CACHE_DIR, "silence.mp3")
+        if not os.path.exists(self.silence_path):
+            self._create_silence_file()
+
+    def _create_silence_file(self):
+        """إنشاء ملف صمت مدته ثانية واحدة بتردد 44100"""
+        try:
+            # الأمر يقوم بإنشاء ملف mp3 صامت
+            cmd = [
+                'ffmpeg', '-y', '-f', 'lavfi', 
+                '-i', 'anullsrc=r=44100:cl=stereo', 
+                '-t', '0.25', # المدة بالثواني
+                '-q:a', '2', 
+                self.silence_path
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print(f"⚠️ تحذير: فشل إنشاء ملف الصمت: {e}")
 
     def _download_file(self, url, filepath):
         if os.path.exists(filepath):
             return True
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, stream=True, headers=headers)
+            response = requests.get(url, stream=True, headers=headers, timeout=15)
             if response.status_code == 200:
                 with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(1024):
+                    for chunk in response.iter_content(4096):
                         f.write(chunk)
                 return True
         except Exception as e:
             print(f"Error downloading {url}: {e}")
         return False
 
-    # ✅ التعديل: استقبال repeat_count
     def merge_verses(self, verses_list, reciter_url, reciter_id, repeat_count=1):
-        combined_audio = AudioSegment.empty()
-        
-        # إنشاء مقطع صمت مدته 300 ملي ثانية (أقل من ثانية بقليل) للفصل بين التكرارات
-        silence = AudioSegment.silent(duration=300) 
-
         downloaded_files = []
-
+        
+        # 1. تحميل الملفات (بدون تحميلها للرام)
         for v in verses_list:
             file_name = f"{reciter_id}_{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
             full_url = f"{reciter_url}{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
             local_path = os.path.join(AUDIO_CACHE_DIR, file_name)
             
-            if self._download_file(full_url, local_path):
-                try:
-                    # تحميل الآية
-                    ayah_segment = AudioSegment.from_mp3(local_path)
-                    
-                    # ✅ منطق التكرار:
-                    # نكرر الآية + الصمت (عدد مرات التكرار)
-                    # مثال: (الآية + صمت) + (الآية + صمت) ...
-                    repeated_segment = (ayah_segment + silence) * repeat_count
-                    
-                    combined_audio += repeated_segment
-                    downloaded_files.append(local_path)
-                except Exception as e:
-                    print(f"❌ خطأ دمج: {e}")
+            # نستخدم المسار المطلق (Absolute Path) لتجنب مشاكل FFmpeg
+            abs_path = os.path.abspath(local_path)
+            
+            if self._download_file(full_url, abs_path):
+                downloaded_files.append(abs_path)
             else:
                 print(f"⚠️ فشل تحميل: {full_url}")
 
-        if len(downloaded_files) == 0:
+        if not downloaded_files:
             return None
 
+        # اسم الملف الناتج
         first = verses_list[0]
         last = verses_list[-1]
-        
-        # ✅ التعديل في اسم الملف: إضافة _rep{repeat_count}
-        # مثال: merged_1_rep3_002_001_to_005.ogg
-        output_filename = f"merged_{reciter_id}_rep{repeat_count}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.ogg"
+        output_filename = f"merged_{reciter_id}_rep{repeat_count}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.mp3"
         output_path = os.path.join(AUDIO_CACHE_DIR, output_filename)
+        abs_output_path = os.path.abspath(output_path)
 
-        if os.path.exists(output_path):
+        # إذا الملف موجود مسبقاً، نرجعه فوراً
+        if os.path.exists(abs_output_path):
             return output_path
 
+        # 2. إنشاء قائمة الدمج (Concat List)
+        # هذه القائمة تخبر FFmpeg بترتيب الملفات (الآية ثم الصمت ثم الآية...)
+        list_txt_path = os.path.join(AUDIO_CACHE_DIR, f"list_{reciter_id}_{first['sura']}_{first['ayah']}.txt")
+        
         try:
-            combined_audio.export(output_path, format="ogg", codec="libopus", bitrate="128k")
+            with open(list_txt_path, 'w', encoding='utf-8') as f:
+                silence_abs = os.path.abspath(self.silence_path)
+                
+                for file_path in downloaded_files:
+                    # تكرار الآية حسب العدد المطلوب
+                    for _ in range(repeat_count):
+                        # كتابة مسار الآية
+                        # ملاحظة: FFmpeg يتطلب استبدال \ بـ / في ويندوز، والمسار بين ' '
+                        safe_path = file_path.replace('\\', '/')
+                        f.write(f"file '{safe_path}'\n")
+                        
+                        # كتابة مسار الصمت بعدها (إذا كان ملف الصمت موجوداً)
+                        if os.path.exists(silence_abs):
+                            safe_silence = silence_abs.replace('\\', '/')
+                            f.write(f"file '{safe_silence}'\n")
+
+            # 3. تشغيل FFmpeg للدمج
+            # الأمر يقوم بالتالي:
+            # -f concat: استخدام وضع الدمج
+            # -safe 0: السماح بمسارات مطلقة
+            # -ar 44100: توحيد التردد (لحل مشكلة الآيفون)
+            # -ac 2: توحيد القنوات لـ Stereo (للحفاظ على الجودة)
+            # -b:a 128k: تثبيت الجودة
+            
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', list_txt_path,
+                '-ar', '44100',  # ✅ سر حل مشكلة الصوت المخيف
+                '-ac', '2',      # ✅ الحفاظ على الستيريو
+                '-b:a', '128k',  # جودة ممتازة
+                abs_output_path
+            ]
+            
+            # تشغيل الأمر وانتظار انتهائه
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
+            
             return output_path
+
+        except subprocess.CalledProcessError as e:
+            print(f"❌ FFmpeg Error: {e}")
+            return None
         except Exception as e:
-            print(f"Export Error: {e}")
-            # Fallback
-            output_filename = output_filename.replace(".ogg", ".mp3")
-            output_path = os.path.join(AUDIO_CACHE_DIR, output_filename)
-            combined_audio.export(output_path, format="mp3")
-            return output_path
+            print(f"❌ General Error: {e}")
+            return None
+        finally:
+            # تنظيف ملف القائمة النصية فقط (نترك الصوتيات للكاش)
+            if os.path.exists(list_txt_path):
+                try: os.remove(list_txt_path)
+                except: pass
 
     def clear_cache(self):
+        """تنظيف الكاش بالكامل"""
         for f in os.listdir(AUDIO_CACHE_DIR):
-            try: os.remove(os.path.join(AUDIO_CACHE_DIR, f))
+            try:
+                # لا نحذف ملف الصمت لأنه ثابت
+                if "silence" not in f:
+                    os.remove(os.path.join(AUDIO_CACHE_DIR, f))
             except: pass
