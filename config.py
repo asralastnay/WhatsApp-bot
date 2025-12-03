@@ -40,8 +40,8 @@ DEFAULT_USER_SETTINGS = {
     "text_enabled": True,
     "audio_enabled": True,
     "reciter_id": 1,
-    "merge_audio": True
-}
+    "merge_audio": True,
+    "repeat_count": 1}
 
 # ---------------------------------------------------------
 # 6. تهيئة النظام
