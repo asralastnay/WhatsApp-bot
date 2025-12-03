@@ -16,7 +16,7 @@ class GreenClient:
         self.base_url = WAHA_BASE_URL
         self.api_key = WAHA_API_KEY
         
-        # نقاط الاتصال
+        # نقاط الاتصال (Endpoints)
         self.send_text_url = f"{self.base_url}/api/sendText"
         self.send_file_url = f"{self.base_url}/api/sendFile"
 
@@ -50,43 +50,45 @@ class GreenClient:
             except Exception as e:
                 print(f"Error Part {i}: {e}")
 
-    # --- 2. إرسال الملفات (Voice Note) ---
+    # --- 2. إرسال الملفات (Audio File Mode) ---
     def send_file(self, chat_id, file_path_or_url, caption=""):
         try:
             headers = self._get_headers()
             final_url = ""
             
-            # 1. إعدادات الصوت الافتراضية (للآيفون والواتساب)
-            mimetype = 'audio/ogg; codecs=opus' 
+            # ✅ تحديد النوع: audio/mp4 هو الأفضل لملفات MP3 على الواتساب
+            # هذا النوع يضمن أن الواتساب يعامله كملف صوتي عالي الجودة وليس Voice Note
+            mimetype = 'audio/mp4' 
 
-            # 2. فحص الرابط أو الملف
+            # 1. معالجة الرابط أو المسار
             if str(file_path_or_url).startswith("http"):
+                # رابط خارجي مباشر
                 final_url = file_path_or_url
-                # إذا كان رابط خارجي مباشر (mp3) نغير النوع ليعمل
-                if final_url.endswith(".mp3"):
-                     mimetype = 'audio/mp4'
             else:
-                # إذا كان ملف محلي (تم دمجه وتحويله لـ ogg في audio_mixer)
+                # ملف محلي (تم دمجه بـ FFmpeg)
                 filename = os.path.basename(file_path_or_url)
+                # نحوله لرابط ليتمكن سيرفر الواتساب من تحميله
                 final_url = f"{MY_BOT_URL}/audio/{filename}"
                 print(f"🔄 Converted local path to URL: {final_url}")
 
-            # 3. تجهيز البيانات
+            # 2. تجهيز البيانات
             payload = {
                 'chatId': chat_id,
                 'file': { 'url': final_url },
                 'mimetype': mimetype,
                 'caption': caption,
-                'ptt': True  # ✅ أمر تحويل الرسالة إلى Voice Note
+                # ⛔️ هام جداً: PTT مغلق (False) لحل مشكلة الآيفون
+                # هذا سيجعل الملف يظهر مع زر تشغيل واسم الملف، ويحافظ على الجودة الأصلية
+                'ptt': False 
             }
             
-            print(f"📤 Sending Voice Note to Node.js: {final_url}")
+            print(f"📤 Sending Audio File to Node.js: {final_url}")
             
-            # 4. التنفيذ والتحقق
+            # 3. الإرسال
             response = requests.post(self.send_file_url, json=payload, headers=headers)
             
             if response.status_code in [200, 201]:
-                print("✅ Voice Note sent successfully!")
+                print("✅ Audio File sent successfully!")
             else:
                 print(f"❌ Server Error: {response.status_code} - {response.text}")
 
