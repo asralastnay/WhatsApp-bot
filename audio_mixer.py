@@ -23,30 +23,31 @@ class AudioMixer:
             print(f"Error downloading {url}: {e}")
         return False
 
-    # ✅ التعديل هنا: أضفنا reciter_id كمعامل جديد
-    def merge_verses(self, verses_list, reciter_url, reciter_id):
-        """
-        reciter_id: رقم القارئ لتمييز الملفات عن بعضها
-        """
+    # ✅ التعديل: استقبال repeat_count
+    def merge_verses(self, verses_list, reciter_url, reciter_id, repeat_count=1):
         combined_audio = AudioSegment.empty()
-        downloaded_files = []
         
-        # لا نحتاج لطباعة هذا السطر لتخفيف الضغط
-        # print(f"🎧 جاري دمج {len(verses_list)} آية...")
+        # إنشاء مقطع صمت مدته 300 ملي ثانية (أقل من ثانية بقليل) للفصل بين التكرارات
+        silence = AudioSegment.silent(duration=300) 
+
+        downloaded_files = []
 
         for v in verses_list:
-            # اسم ملف الآية الفردية (يمكن بقاؤه كما هو)
             file_name = f"{reciter_id}_{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
             full_url = f"{reciter_url}{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
-            
-            # في بعض السيرفرات الآيات تكون بأسماء مختلفة، سنفترض أن reciter_url ينتهي بـ /
-            # عدلنا اسم الملف المحلي ليشمل رقم القارئ أيضاً لتجنب تداخل الآيات
             local_path = os.path.join(AUDIO_CACHE_DIR, file_name)
             
             if self._download_file(full_url, local_path):
                 try:
-                    audio_segment = AudioSegment.from_mp3(local_path)
-                    combined_audio += audio_segment
+                    # تحميل الآية
+                    ayah_segment = AudioSegment.from_mp3(local_path)
+                    
+                    # ✅ منطق التكرار:
+                    # نكرر الآية + الصمت (عدد مرات التكرار)
+                    # مثال: (الآية + صمت) + (الآية + صمت) ...
+                    repeated_segment = (ayah_segment + silence) * repeat_count
+                    
+                    combined_audio += repeated_segment
                     downloaded_files.append(local_path)
                 except Exception as e:
                     print(f"❌ خطأ دمج: {e}")
@@ -59,29 +60,20 @@ class AudioMixer:
         first = verses_list[0]
         last = verses_list[-1]
         
-        # ✅ التعديل الجذري: اسم الملف يشمل رقم القارئ (reciter_id)
-        # مثال: merged_1_002_001_to_005.ogg
-        output_filename = f"merged_{reciter_id}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.ogg"
+        # ✅ التعديل في اسم الملف: إضافة _rep{repeat_count}
+        # مثال: merged_1_rep3_002_001_to_005.ogg
+        output_filename = f"merged_{reciter_id}_rep{repeat_count}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.ogg"
         output_path = os.path.join(AUDIO_CACHE_DIR, output_filename)
 
-        # إذا الملف موجود مسبقاً (لنفس القارئ ونفس الآيات)، نرجعه فوراً
         if os.path.exists(output_path):
-            print(f"✅ الملف موجود مسبقاً في الكاش: {output_filename}")
             return output_path
 
-        print(f"💾 إنشاء ملف جديد: {output_filename}")
-        
         try:
-            combined_audio.export(
-                output_path, 
-                format="ogg", 
-                codec="libopus", 
-                bitrate="128k"
-            )
+            combined_audio.export(output_path, format="ogg", codec="libopus", bitrate="128k")
             return output_path
         except Exception as e:
-            print(f"❌ خطأ Export: {e}")
-            # Fallback to mp3
+            print(f"Export Error: {e}")
+            # Fallback
             output_filename = output_filename.replace(".ogg", ".mp3")
             output_path = os.path.join(AUDIO_CACHE_DIR, output_filename)
             combined_audio.export(output_path, format="mp3")
@@ -89,6 +81,5 @@ class AudioMixer:
 
     def clear_cache(self):
         for f in os.listdir(AUDIO_CACHE_DIR):
-            try:
-                os.remove(os.path.join(AUDIO_CACHE_DIR, f))
+            try: os.remove(os.path.join(AUDIO_CACHE_DIR, f))
             except: pass
