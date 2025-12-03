@@ -9,20 +9,19 @@ class AudioMixer:
         if not os.path.exists(AUDIO_CACHE_DIR):
             os.makedirs(AUDIO_CACHE_DIR)
         
-        # إنشاء ملف صمت قياسي مرة واحدة (مدته 1 ثانية) لاستخدامه في الفواصل
-        # نستخدم ffmpeg لإنشائه لضمان تطابق التردد
+        # إنشاء ملف صمت قياسي (0.3 ثانية)
         self.silence_path = os.path.join(AUDIO_CACHE_DIR, "silence.mp3")
         if not os.path.exists(self.silence_path):
             self._create_silence_file()
 
     def _create_silence_file(self):
-        """إنشاء ملف صمت مدته ثانية واحدة بتردد 44100"""
+        """إنشاء ملف صمت مدته 0.3 ثانية بتردد 44100"""
         try:
-            # الأمر يقوم بإنشاء ملف mp3 صامت
+            # -t 0.3 تعني 300 جزء من الثانية
             cmd = [
                 'ffmpeg', '-y', '-f', 'lavfi', 
                 '-i', 'anullsrc=r=44100:cl=stereo', 
-                '-t', '0.25', # المدة بالثواني
+                '-t', '0.3', 
                 '-q:a', '2', 
                 self.silence_path
             ]
@@ -48,13 +47,13 @@ class AudioMixer:
     def merge_verses(self, verses_list, reciter_url, reciter_id, repeat_count=1):
         downloaded_files = []
         
-        # 1. تحميل الملفات (بدون تحميلها للرام)
+        # 1. تحميل ملفات الآيات (MP3)
         for v in verses_list:
             file_name = f"{reciter_id}_{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
             full_url = f"{reciter_url}{str(v['sura']).zfill(3)}{str(v['ayah']).zfill(3)}.mp3"
             local_path = os.path.join(AUDIO_CACHE_DIR, file_name)
             
-            # نستخدم المسار المطلق (Absolute Path) لتجنب مشاكل FFmpeg
+            # نستخدم المسار المطلق لتجنب مشاكل FFmpeg
             abs_path = os.path.abspath(local_path)
             
             if self._download_file(full_url, abs_path):
@@ -65,10 +64,10 @@ class AudioMixer:
         if not downloaded_files:
             return None
 
-        # اسم الملف الناتج
+        # اسم الملف الناتج (لاحظ الامتداد .m4a)
         first = verses_list[0]
         last = verses_list[-1]
-        output_filename = f"merged_{reciter_id}_rep{repeat_count}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.mp3"
+        output_filename = f"merged_{reciter_id}_rep{repeat_count}_{first['sura']}_{first['ayah']}_to_{last['ayah']}.m4a"
         output_path = os.path.join(AUDIO_CACHE_DIR, output_filename)
         abs_output_path = os.path.abspath(output_path)
 
@@ -77,7 +76,6 @@ class AudioMixer:
             return output_path
 
         # 2. إنشاء قائمة الدمج (Concat List)
-        # هذه القائمة تخبر FFmpeg بترتيب الملفات (الآية ثم الصمت ثم الآية...)
         list_txt_path = os.path.join(AUDIO_CACHE_DIR, f"list_{reciter_id}_{first['sura']}_{first['ayah']}.txt")
         
         try:
@@ -85,38 +83,36 @@ class AudioMixer:
                 silence_abs = os.path.abspath(self.silence_path)
                 
                 for file_path in downloaded_files:
-                    # تكرار الآية حسب العدد المطلوب
+                    # تكرار الآية + الصمت حسب العدد المطلوب
                     for _ in range(repeat_count):
                         # كتابة مسار الآية
-                        # ملاحظة: FFmpeg يتطلب استبدال \ بـ / في ويندوز، والمسار بين ' '
                         safe_path = file_path.replace('\\', '/')
                         f.write(f"file '{safe_path}'\n")
                         
-                        # كتابة مسار الصمت بعدها (إذا كان ملف الصمت موجوداً)
+                        # كتابة مسار الصمت بعدها (إذا وجد)
                         if os.path.exists(silence_abs):
                             safe_silence = silence_abs.replace('\\', '/')
                             f.write(f"file '{safe_silence}'\n")
 
-            # 3. تشغيل FFmpeg للدمج
-            # الأمر يقوم بالتالي:
-            # -f concat: استخدام وضع الدمج
-            # -safe 0: السماح بمسارات مطلقة
-            # -ar 44100: توحيد التردد (لحل مشكلة الآيفون)
-            # -ac 2: توحيد القنوات لـ Stereo (للحفاظ على الجودة)
-            # -b:a 128k: تثبيت الجودة
+            # 3. تشغيل FFmpeg للدمج والتحويل إلى M4A (AAC)
+            # هذا الأمر هو الحل السحري للآيفون:
+            # -c:a aac : يحول الترميز إلى AAC (صديق آبل)
+            # -movflags +faststart : يجعل الملف جاهزاً للتشغيل الفوري
             
             cmd = [
                 'ffmpeg', '-y',
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', list_txt_path,
-                '-ar', '44100',  # ✅ سر حل مشكلة الصوت المخيف
-                '-ac', '2',      # ✅ الحفاظ على الستيريو
-                '-b:a', '128k',  # جودة ممتازة
+                '-c:a', 'aac',       # ✅ التحويل إلى AAC
+                '-b:a', '128k',      # جودة عالية
+                '-ac', '2',          # Stereo
+                '-ar', '44100',      # التردد القياسي
+                '-movflags', '+faststart', # تحسين التوافق
                 abs_output_path
             ]
             
-            # تشغيل الأمر وانتظار انتهائه
+            # تشغيل الأمر
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
             
             return output_path
@@ -128,16 +124,15 @@ class AudioMixer:
             print(f"❌ General Error: {e}")
             return None
         finally:
-            # تنظيف ملف القائمة النصية فقط (نترك الصوتيات للكاش)
+            # تنظيف ملف القائمة النصية
             if os.path.exists(list_txt_path):
                 try: os.remove(list_txt_path)
                 except: pass
 
     def clear_cache(self):
-        """تنظيف الكاش بالكامل"""
+        """تنظيف الكاش"""
         for f in os.listdir(AUDIO_CACHE_DIR):
             try:
-                # لا نحذف ملف الصمت لأنه ثابت
                 if "silence" not in f:
                     os.remove(os.path.join(AUDIO_CACHE_DIR, f))
             except: pass
