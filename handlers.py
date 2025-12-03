@@ -1,6 +1,7 @@
 import threading
 import json
 import os
+import time
 from config import RECITERS_FILE, MAX_VERSES_TO_MERGE
 from data_loader import QuranHandler
 from whatsapp_client import GreenClient
@@ -29,7 +30,6 @@ def get_formatted_reciters_list():
     """تجهيز قائمة القراء مع التفاصيل (الدقة والنوع)"""
     msg = "🎙️ *قائمة القراء المتاحين:*\n━━━━━━━━━━━━\n"
     for r in RECITERS_DATA:
-        # إضافة تفاصيل لتمييز المكرر
         quality = f"{r.get('bitrate', '?')}kbps"
         rtype = r.get('type', '')
         msg += f"🆔 *{r['id']}* ➖ {r['name']}\n"
@@ -37,6 +37,21 @@ def get_formatted_reciters_list():
     
     msg += "\n📝 *للاختيار السريع:*\nأرسل حرف `ق` ورقم القارئ.\nمثال: `ق 2`"
     return msg
+
+# --- دالة الحذف المؤجل (لحذف الملف بعد 5 دقائق) ---
+def schedule_delete(file_path, delay=300):
+    """تحذف الملف بعد مدة محددة (بالثواني)"""
+    def _delete():
+        try:
+            time.sleep(delay)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"🗑️ Deleted cached file: {file_path}")
+        except Exception as e:
+            print(f"❌ Error deleting file: {e}")
+            
+    # تشغيل الحذف في خيط منفصل حتى لا يعطل البرنامج
+    threading.Thread(target=_delete, daemon=True).start()
 
 # --- المعالج الرئيسي (Router) ---
 def handle_incoming_message(chat_id, text):
@@ -49,13 +64,11 @@ def handle_incoming_message(chat_id, text):
     print(f"📩 طلب من {chat_id}: {text}")
 
     # ==========================================
-    # 1. أوامر الإعدادات والقراء (ق، إعدادات)
+    # 1. أوامر الإعدادات والقراء
     # ==========================================
     
-    # تغيير القارئ (ق [رقم])
     if clean_text.startswith("ق ") and clean_text.split()[1].isdigit():
         new_id = int(clean_text.split()[1])
-        # هل الرقم موجود؟
         if any(r['id'] == new_id for r in RECITERS_DATA):
             users_mgr.update_setting(chat_id, 'reciter_id', new_id)
             r_info = get_reciter_details(new_id)
@@ -64,12 +77,10 @@ def handle_incoming_message(chat_id, text):
             client.send_text(chat_id, "❌ رقم القارئ غير صحيح. أرسل `قراء` لعرض القائمة.")
         return
 
-    # عرض القراء
     if clean_text in ['قراء', 'قرا', 'مشايخ']:
         client.send_text(chat_id, get_formatted_reciters_list())
         return
 
-    # الإعدادات العامة
     if clean_text in ['اعدادات', 'إعدادات', 'ضبط']:
         curr_reciter = get_reciter_details(settings['reciter_id'])
         msg = f"⚙️ *إعداداتك:*\n\n"
@@ -80,7 +91,6 @@ def handle_incoming_message(chat_id, text):
         client.send_text(chat_id, msg)
         return
 
-    # تبديل الصوت/النص
     if clean_text == 'صوت':
         new_val = not settings['audio_enabled']
         users_mgr.update_setting(chat_id, 'audio_enabled', new_val)
@@ -93,59 +103,46 @@ def handle_incoming_message(chat_id, text):
         return
 
     # ==========================================
-    # 2. أوامر القرآن (س، ج، ص، آ)
+    # 2. أوامر القرآن
     # ==========================================
     verses_to_send = []
     header_info = ""
 
-    # أمر السورة (س [اسم] أو س [رقم])
     if clean_text.startswith("س "):
         query = text[2:].strip()
-        # هل هو رقم؟ (س 18)
         if query.isdigit():
              verses_to_send = quran.get_surah(int(query))
         else:
-             # هل هو اسم؟ (س الكهف)
              verses_to_send = quran.get_surah(query)
         
         if verses_to_send:
             header_info = f"سورة {verses_to_send[0]['sura_name']}"
 
-    # أمر الجزء (ج [رقم])
     elif clean_text.startswith("ج "):
         try:
             verses_to_send = quran.get_juz(int(text[2:]))
             header_info = f"الجزء {text[2:]}"
         except: pass
 
-    # أمر الصفحة (ص [رقم])
     elif clean_text.startswith("ص "):
         try:
             verses_to_send = quran.get_page(int(text[2:]))
             header_info = f"الصفحة {text[2:]}"
         except: pass
         
-    # أمر الحزب (حزب [رقم])
     elif clean_text.startswith("حزب "):
         try:
             verses_to_send = quran.get_hizb(int(text[4:]))
             header_info = f"الحزب {text[4:]}"
         except: pass
 
-    # أمر الآيات والمجالات (آ ...)
     elif clean_text.startswith("ا ") or clean_text.startswith("آ "):
-        content = text.split(' ', 1)[1] # حذف حرف الأمر
-        # التحقق من وجود مجال (إلى، -)
+        content = text.split(' ', 1)[1]
         if "-" in content or " الى " in content or " إلى " in content:
-            # تنظيف الفواصل
             content = content.replace(" الى ", "-").replace(" إلى ", "-")
             parts = content.split("-")
-            # الجزء الأول يحتوي الاسم وبداية الآية (مثال: البقرة 50)
             first_part = parts[0].strip()
-            # الجزء الثاني هو النهاية (مثال: 90)
             end_num = int(parts[1].strip())
-            
-            # فصل اسم السورة عن رقم البداية
             last_space = first_part.rfind(" ")
             sura_name = first_part[:last_space].strip()
             start_num = int(first_part[last_space:].strip())
@@ -153,7 +150,6 @@ def handle_incoming_message(chat_id, text):
             verses_to_send = quran.get_ayah_range(sura_name, start_num, end_num)
             header_info = f"آيات من {sura_name}"
         else:
-            # آية مفردة (آ البقرة 50)
             parts = content.split()
             ayah_num = int(parts[-1])
             sura_name = " ".join(parts[:-1])
@@ -166,7 +162,6 @@ def handle_incoming_message(chat_id, text):
     # 3. التنفيذ
     # ==========================================
     if verses_to_send:
-        # إرسال النص
         if settings['text_enabled']:
             if len(verses_to_send) > 50:
                  client.send_text(chat_id, f"⏳ جاري تحضير النص: {header_info}...")
@@ -174,20 +169,16 @@ def handle_incoming_message(chat_id, text):
             full_text = format_text_msg(verses_to_send, header_info)
             threading.Thread(target=client.send_text, args=(chat_id, full_text)).start()
 
-        # إرسال الصوت (مونتاج)
         if settings['audio_enabled']:
             threading.Thread(target=process_audio_request, args=(chat_id, verses_to_send, settings)).start()
         
         return
 
-    # إذا لم يكن أمراً معروفاً (ولا رقم مباشر)
-    # نرسل الترحيب فقط
     client.send_text(chat_id, get_welcome_text())
 
 # --- دوال المعالجة الخلفية ---
 def format_text_msg(verses, title):
     msg = f"🕌 *{title}* 🕌\n━━━━━━━━━━━━\n\n"
-    # بسملة
     if verses[0]['numberInSurah'] == 1 and verses[0]['sura_number'] not in [1, 9]:
         msg += "﷽\n\n"
         
@@ -197,26 +188,29 @@ def format_text_msg(verses, title):
     return msg
 
 def process_audio_request(chat_id, verses, settings):
-    # التحقق من الحد الأقصى للدمج
     if len(verses) > MAX_VERSES_TO_MERGE:
         client.send_text(chat_id, "⚠️ *عدد الآيات كبير جداً للدمج الصوتي.* سيتم الاكتفاء بالنص.")
         return
 
     client.send_text(chat_id, "🎧 *جاري تحضير التلاوة...*")
     
-    # جلب رابط القارئ المختار
-    reciter = get_reciter_details(settings['reciter_id'])
+    # 1. جلب رقم القارئ والرابط
+    reciter_id = settings['reciter_id']
+    reciter = get_reciter_details(reciter_id)
     reciter_url = reciter['url']
     
-    # تجهيز البيانات للمونتاج
     verses_data = [{'sura': v['sura_number'], 'ayah': v['numberInSurah']} for v in verses]
     
-    # الدمج
     try:
-        file_path = mixer.merge_verses(verses_data, reciter_url)
+        # ✅ التعديل الأهم: تمرير reciter_id لدالة الدمج
+        file_path = mixer.merge_verses(verses_data, reciter_url, reciter_id)
+        
         if file_path:
-            client.send_file(chat_id, file_path)
-            # os.remove(file_path) # حذف بعد الإرسال (اختياري)
+            caption = f"🎤 القارئ: {reciter['name']}"
+            client.send_file(chat_id, file_path, caption=caption)
+            
+            # ✅ تفعيل الحذف التلقائي بعد 5 دقائق (300 ثانية)
+            schedule_delete(file_path, delay=300)
         else:
             client.send_text(chat_id, "❌ لم يتم العثور على الملف الصوتي.")
     except Exception as e:
@@ -226,13 +220,13 @@ def get_welcome_text():
     return (
         "👋 *أهلاً بك في رفيق القرآن*\n\n"
         "📜 *الأوامر المتاحة:*\n"
-        "• `س الكهف` أو `س 18` (للسور)\n"
+        "• `س الكهف` أو `س 18`\n"
         "• `ج 30` (للأجزاء)\n"
         "• `ص 100` (للصفحات)\n"
-        "• `آ البقرة 50` (آية)\n"
-        "• `آ البقرة 1 إلى 10` (مجموعة آيات)\n\n"
+        "• `آ البقرة 50`\n"
+        "• `آ البقرة 1 إلى 5`\n\n"
         "⚙️ *الإعدادات:*\n"
-        "• `قراء` لعرض القراء\n"
-        "• `ق 2` لتغيير القارئ بسرعة\n"
-        "• `إعدادات` للتحكم بالصوت والنص"
+        "• `قراء` لعرض القائمة\n"
+        "• `ق 2` لتغيير القارئ\n"
+        "• `صوت` أو `نص` للتبديل"
     )
