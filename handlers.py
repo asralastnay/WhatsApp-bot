@@ -132,10 +132,20 @@ def handle_incoming_message(chat_id, text):
         except: pass
         
     # حزب
-    elif clean_text.startswith("حزب "):
+    elif clean_text.startswith("ح "):
         try:
-            verses_to_send = quran.get_hizb(int(text[4:]))
-            header_info = f"الحزب {text[4:]}"
+            val = int(text[2:]) # قص أول حرفين
+            verses_to_send = quran.get_hizb(val)
+            header_info = f"الحزب {val}"
+        except: pass
+            
+    # ✅ إضافة: أمر الربع (ر)
+    # يعتمد على دالة get_hizb_quarter التي أضفناها قبل قليل
+    elif clean_text.startswith("ر "):
+        try:
+            val = int(text[2:]) # قص أول حرفين
+            verses_to_send = quran.get_hizb_quarter(val)
+            header_info = f"الربع {val}"
         except: pass
 
     # آيات (نطاق أو مفرد)
