@@ -31,14 +31,10 @@ class QuranHandler:
         # 2. إذا كان اسماً (بحث ذكي)
         clean_id = self._clean_text(identifier)
         
-        # نبحث في أول آية من كل سورة (لأن القاعدة مسطحة)
-        # لتسريع البحث، نمر على البيانات ونفحص الآيات رقم 1 فقط
+        # نبحث في أول آية من كل سورة (لتسريع البحث)
         for ayah in self.data:
             if ayah['numberInSurah'] == 1:
-                # اسم السورة في القاعدة يكون "سورة الفاتحة"
-                db_name = self._clean_text(ayah['sura_name']) # سوره الفاتحه
-                
-                # هل الاسم المدخل جزء من اسم القاعدة؟ (مثلاً "فاتحة" موجودة في "سورة الفاتحة")
+                db_name = self._clean_text(ayah['sura_name'])
                 if clean_id in db_name:
                     return ayah['sura_number']
         return None
@@ -47,23 +43,19 @@ class QuranHandler:
     def get_surah(self, identifier):
         sura_num = self._get_surah_number(identifier)
         if not sura_num: return None
-
-        # تصفية الآيات التابعة لهذه السورة
-        verses = [a for a in self.data if a['sura_number'] == sura_num]
-        return verses
+        return [a for a in self.data if a['sura_number'] == sura_num]
 
     # --- جلب آية محددة ---
     def get_ayah(self, identifier, ayah_num):
         sura_num = self._get_surah_number(identifier)
         if not sura_num: return None
 
-        # البحث عن الآية (رقم السورة + رقم الآية داخل السورة)
         for ayah in self.data:
             if ayah['sura_number'] == sura_num and ayah['numberInSurah'] == ayah_num:
                 return ayah
         return None
 
-    # --- جلب مجال آيات (للمونتاج الصوتي) ---
+    # --- جلب مجال آيات ---
     def get_ayah_range(self, identifier, start, end):
         sura_num = self._get_surah_number(identifier)
         if not sura_num: return None
@@ -83,27 +75,17 @@ class QuranHandler:
     def get_juz(self, juz_num):
         return [a for a in self.data if a['juz'] == juz_num]
 
-    # --- جلب حزب (الميزة الجديدة) ---
+    # --- جلب حزب ---
     def get_hizb(self, hizb_num):
         return [a for a in self.data if a['hizb'] == hizb_num]
-        # 
 
+    # --- ✅ جلب ربع حزب (تم التصحيح) ---
     def get_hizb_quarter(self, quarter_number):
-        """جلب آيات الربع المحدد (hizbQuarter)"""
-        verses = []
-        for sura in self.quran_data:
-            for ayah in sura['verses']:
-                # التأكد من وجود المفتاح ومطابقته للرقم المطلوب
-                if ayah.get('hizbQuarter') == quarter_number:
-                    # ننسخ الآية لنضيف لها اسم السورة ورقمها (مهم للعرض)
-                    ayah_copy = ayah.copy()
-                    ayah_copy['sura_name'] = sura['name']
-                    ayah_copy['sura_number'] = sura['id']
-                    verses.append(ayah_copy)
-        return verses
-
+        # البحث المباشر في القائمة المسطحة باستخدام المفتاح hizbQuarter
+        # نستخدم .get() لتجنب الخطأ إذا كان المفتاح غير موجود في بعض السجلات
+        return [a for a in self.data if a.get('hizbQuarter') == quarter_number]
     
-    # --- دالة مساعدة لجلب اسم السورة من رقمها (للعرض) ---
+    # --- دالة مساعدة لجلب اسم السورة من رقمها ---
     def get_surah_name_by_number(self, surah_num):
         for ayah in self.data:
             if ayah['sura_number'] == surah_num:
