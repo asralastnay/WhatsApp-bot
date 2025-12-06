@@ -86,7 +86,23 @@ class QuranHandler:
     # --- جلب حزب (الميزة الجديدة) ---
     def get_hizb(self, hizb_num):
         return [a for a in self.data if a['hizb'] == hizb_num]
+        # 
 
+    def get_hizb_quarter(self, quarter_number):
+        """جلب آيات الربع المحدد (hizbQuarter)"""
+        verses = []
+        for sura in self.quran_data:
+            for ayah in sura['verses']:
+                # التأكد من وجود المفتاح ومطابقته للرقم المطلوب
+                if ayah.get('hizbQuarter') == quarter_number:
+                    # ننسخ الآية لنضيف لها اسم السورة ورقمها (مهم للعرض)
+                    ayah_copy = ayah.copy()
+                    ayah_copy['sura_name'] = sura['name']
+                    ayah_copy['sura_number'] = sura['id']
+                    verses.append(ayah_copy)
+        return verses
+
+    
     # --- دالة مساعدة لجلب اسم السورة من رقمها (للعرض) ---
     def get_surah_name_by_number(self, surah_num):
         for ayah in self.data:
