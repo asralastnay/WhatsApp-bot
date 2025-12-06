@@ -139,8 +139,6 @@ def handle_incoming_message(chat_id, text):
             header_info = f"الحزب {val}"
         except: pass
             
-    # ✅ إضافة: أمر الربع (ر)
-    # يعتمد على دالة get_hizb_quarter التي أضفناها قبل قليل
     elif clean_text.startswith("ر "):
         try:
             val = int(text[2:]) # قص أول حرفين
