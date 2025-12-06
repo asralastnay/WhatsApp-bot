@@ -131,17 +131,19 @@ def handle_incoming_message(chat_id, text):
             header_info = f"الصفحة {text[2:]}"
         except: pass
         
-    # حزب
+    # حزب (ح [رقم])
     elif clean_text.startswith("ح "):
         try:
             val = int(text[2:]) # قص أول حرفين
             verses_to_send = quran.get_hizb(val)
             header_info = f"الحزب {val}"
         except: pass
-            
+
+    # ✅ إضافة: ربع (ر [رقم])
     elif clean_text.startswith("ر "):
         try:
             val = int(text[2:]) # قص أول حرفين
+            # يستدعي الدالة الجديدة في data_loader
             verses_to_send = quran.get_hizb_quarter(val)
             header_info = f"الربع {val}"
         except: pass
